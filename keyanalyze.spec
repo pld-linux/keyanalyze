@@ -2,7 +2,7 @@ Summary:	Analyze OpenPGP style keyrings
 Summary(pl):	Analiza pier¶cieni kluczy w formacie OpenPGP
 Name:		keyanalyze
 Version:	200204
-Release:	1
+Release:	2
 License:	GPL	
 Group:		Application
 Source0:	http://dtype.org/keyanalyze/code/%{name}-%{version}.tar.gz
