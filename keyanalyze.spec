@@ -12,7 +12,8 @@ Patch1:		%{name}-keyanalyze.c.patch
 Patch2:		%{name}-pgpring.patch
 Patch3:		%{name}-process_keys.c.patch
 URL:		http://dtype.org/keyanalyze/
-#BuildRequires:	-
+BuildRequires:	autoconf
+BuildRequires:	automake
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %description
@@ -59,4 +60,4 @@ rm -rf $RPM_BUILD_ROOT
 %files
 %defattr(644,root,root,755)
 %doc Changelog README
-%{_bindir}/*
+%attr(755,root,root) %{_bindir}/*
