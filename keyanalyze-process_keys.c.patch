@@ -1,0 +1,11 @@
+--- keyanalyze-0.0.200204.orig/process_keys.c
++++ keyanalyze-0.0.200204/process_keys.c
+@@ -171,7 +171,7 @@
+ int main (int argc, char *argv[])
+ {
+   char buff[1024];
+-  char *s, *t, *r;
++  char *s;
+   
+   struct sig **lastsig = NULL;
+   struct uid **lastuid = NULL;

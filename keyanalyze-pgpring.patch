@@ -1,0 +1,203 @@
+--- keyanalyze-0.0.200204.orig/pgpring/extlib.c
++++ keyanalyze-0.0.200204/pgpring/extlib.c
+@@ -24,6 +24,8 @@
+  * lib.c in external programs.
+  */
+ 
++#include <stdlib.h>
++
+ #define WHERE
+ #define _EXTLIB_C
+ 
+--- keyanalyze-0.0.200204.orig/pgpring/lib.c
++++ keyanalyze-0.0.200204/pgpring/lib.c
+@@ -78,8 +78,9 @@
+   return (p);
+ }
+ 
+-void safe_realloc (void **p, size_t siz)
++void safe_realloc (void *p2, size_t siz)
+ {
++  void **p = (void **)p2;
+   void *r;
+ 
+   if (siz == 0)
+@@ -110,8 +111,9 @@
+   *p = r;
+ }
+ 
+-void safe_free (void **p)
++void safe_free (void *p2)
+ {
++  void **p = (void **)p2;
+   if (*p)
+   {
+     free (*p);				/* __MEM_CHECKED__ */
+@@ -145,7 +147,7 @@
+ 
+ void mutt_str_replace (char **p, const char *s)
+ {
+-  safe_free ((void **) p);
++  safe_free (p);
+   *p = safe_strdup (s);
+ }
+ 
+@@ -451,7 +453,7 @@
+   {
+     if (fgets (s + offset, *size - offset, fp) == NULL)
+     {
+-      safe_free ((void **) &s);
++      safe_free (&s);
+       return NULL;
+     }
+     if ((ch = strchr (s + offset, '\n')) != NULL)
+@@ -484,7 +486,7 @@
+         /* There wasn't room for the line -- increase ``s'' */
+         offset = *size - 1; /* overwrite the terminating 0 */
+         *size += STRING;
+-        safe_realloc ((void **) &s, *size);
++        safe_realloc (&s, *size);
+       }
+     }
+   }
+--- keyanalyze-0.0.200204.orig/pgpring/lib.h
++++ keyanalyze-0.0.200204/pgpring/lib.h
+@@ -64,7 +64,7 @@
+ # define STRING          256
+ # define SHORT_STRING    128
+ 
+-# define FREE(x) safe_free((void **)x)
++# define FREE(x) safe_free(x)
+ # define NONULL(x) x?x:""
+ # define ISSPACE(c) isspace((unsigned char)c)
+ # define strfcpy(A,B,C) strncpy(A,B,C), *(A+(C)-1)=0
+@@ -123,7 +123,7 @@
+ void mutt_str_replace (char **p, const char *s);
+ void mutt_str_adjust (char **p);
+ void mutt_unlink (const char *);
+-void safe_free (void **);
+-void safe_realloc (void **, size_t);
++void safe_free (void *);
++void safe_realloc (void *, size_t);
+ 
+ #endif
+--- keyanalyze-0.0.200204.orig/pgpring/pgplib.c
++++ keyanalyze-0.0.200204/pgpring/pgplib.c
+@@ -126,7 +126,7 @@
+   for (sp = *sigp; sp; sp = q)
+   {
+     q = sp->next;
+-    safe_free ((void **) &sp);
++    safe_free (&sp);
+   }
+   
+   *sigp = NULL;
+@@ -142,8 +142,8 @@
+   {
+     q = up->next;
+     pgp_free_sig (&up->sigs);
+-    safe_free ((void **) &up->addr);
+-    safe_free ((void **) &up);
++    safe_free (&up->addr);
++    safe_free (&up);
+   }
+ 
+   *upp = NULL;
+@@ -177,8 +177,8 @@
+   kp = *kpp;
+ 
+   pgp_free_uid (&kp->address);
+-  safe_free ((void **) &kp->keyid);
+-  safe_free ((void **) kpp);
++  safe_free (&kp->keyid);
++  safe_free (kpp);
+ }
+ 
+ pgp_key_t *pgp_remove_key (pgp_key_t ** klist, pgp_key_t * key)
+--- keyanalyze-0.0.200204.orig/pgpring/pgppacket.c
++++ keyanalyze-0.0.200204/pgpring/pgppacket.c
+@@ -220,6 +220,6 @@
+ void pgp_release_packet (void)
+ {
+   plen = 0;
+-  safe_free ((void **) &pbuf);
++  safe_free (&pbuf);
+ }
+ 
+--- keyanalyze-0.0.200204.orig/pgpring/pgppubring.c
++++ keyanalyze-0.0.200204/pgpring/pgppubring.c
+@@ -210,7 +210,7 @@
+ 
+ bailout:
+ 
+-  safe_free ((void **) &p);
++  safe_free ((void *)&p);
+   return NULL;
+ }
+ 
+@@ -291,7 +291,7 @@
+ 
+   if (alg >= 1 && alg <= 3)
+     skip_bignum (buff, l, j, &j, 2);
+-  else if (alg == 17 || alg == 16)
++  else if (alg == 17 || alg == 16 || alg == 20)
+     skip_bignum (buff, l, j, &j, 1);
+ 
+   pgp_make_pgp3_fingerprint (buff, j, digest);
+@@ -751,7 +751,7 @@
+ 	pgp_free_key (&p);
+       }
+ 
+-      safe_free ((void **) &tmp);
++      safe_free (&tmp);
+     }
+ 
+     FGETPOS(rfp,pos);
+--- keyanalyze-0.0.200204.orig/pgpring/pgpring.1
++++ keyanalyze-0.0.200204/pgpring/pgpring.1
+@@ -0,0 +1,45 @@
++.\" pgpring, a key ring dumper
++.\" Manpage Copyright (c) 2004 Matthew Wilcox
++.\"
++.\" This program is free software; you can redistribute it and/or
++.\" modify it under the terms of the GNU General Public License
++.\" as published by the Free Software Foundation; either version 2
++.\" of the License, or (at your option) any later version.
++.\" 
++.TH PGPRING 1
++.SH NAME
++pgpring \- key ring dumper
++
++.SH SYNTAX
++\fBpgpring\fP [ \fB\-k\fP \fIkeyring\fP | \fB\-2\fP | \fB\-5\fP ]
++[ \fB\-s\fP ] [ \fB\-S\fP ]
++
++.SH DESCRIPTION
++
++\fIpgpring\fP is a key ring dumper.  It extracts information from PGP's
++binary key ring and emits it in an (almost) readable output format
++understood by
++.BR mutt (1)
++and
++.BR process_keys (1)
++.  This output format mimics the one used by the GNU Privacy Guard (GPG).
++
++.SH OPTIONS
++.TP
++.BI \-k " keyring"
++Dump the contents of the specified keyring.
++.TP
++.B \-2
++Use the default keyring for PGP 2.x.
++.TP
++.B \-5
++Use the default keyring for PGP 5.
++.TP
++.B \-s
++Dump the secret keyring.
++.TP
++.B \-S
++Include signatures.
++
++.SH AUTHORS
++Thomas Roessler <roessler@does\-not\-exist.org>

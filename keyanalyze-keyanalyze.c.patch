@@ -1,0 +1,576 @@
+--- keyanalyze-0.0.200204.orig/keyanalyze.c
++++ keyanalyze-0.0.200204/keyanalyze.c
+@@ -11,14 +11,15 @@
+  */
+ 
+ /* some configurables */
+-#define INFILE 		"preprocess.keys"
+-#define OUTDIR		"output/"
++static char *infile = "preprocess.keys";
++static char *outdir = "output/";
+ #define MAXKEYS 	160000 /* MUST be > `grep p preprocess.keys | wc` */
+ #define MINSETSIZE	10 /* minimum set size we care about for strong sets */
+ #define MAXHOPS		30 /* max hop count we care about for report */
+ 
+ /* includes */
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include <sys/types.h>
+ #include <sys/stat.h>
+@@ -38,6 +39,14 @@
+ };
+ typedef struct threadparam threadparam;
+ 
++struct keydata {
++	unsigned int id1;
++	unsigned int id2;
++	sig *to;
++	sig *from;
++};
++
++struct keydata		keys[MAXKEYS];
+ FILE 			*fpin,*fpout,*fpstat,*fpsets,*fpmsd;
+ int 			numkeys = 0;
+ int 			numsigs = 0;
+@@ -47,59 +56,50 @@
+ int			reachable[MAXKEYS];
+ int			num_reachable;
+ float 			meantotal;
+-unsigned long 	keyid1[MAXKEYS];
+-unsigned long	keyid2[MAXKEYS];
+-sig		 		sigsto[MAXKEYS];
+-sig		 		sigsfrom[MAXKEYS];
+ pthread_mutex_t mean_l;
+ 
+ /* declarations */
+-int AddKey (unsigned char *newid);
+-int AddSig (int src, int dst);
+-int CloseFiles();
++void AddKey (unsigned char *newid);
++void AddSig (int src, int dst);
++void CloseFiles();
+ int CountSigs(sig *current);
+-unsigned long ConvertFromHex (const unsigned char *c);
+-int DFSMarkConnected (int *markset, sig *ckset, int id);
++unsigned int ConvertFromHex (const unsigned char *c);
+ int GetKeyById(const unsigned char* searchid);
+-int MeanCrawler(int *distset, int id, int len);
++void MeanCrawler(int *distset, int id, int len);
+ float MeanDistance(int id, int *hops, int *hophigh, sig **farthest);
+ 
+ /* ################################################################# */
+ /* helper functions, in alpha order */
+ 
+-int AddKey (unsigned char *newid) {
+-	/* assume no dupes for now */
+-	keyid1[numkeys] = ConvertFromHex(newid);
+-	keyid2[numkeys] = ConvertFromHex(newid+8);
++void AddKey (unsigned char *newid) {
++	struct keydata *key = &keys[numkeys++];
+ 
+-	numkeys++;
++	/* assume no dupes for now */
++	key->id1 = ConvertFromHex(newid);
++	key->id2 = ConvertFromHex(newid+8);
+ }
+ 
+-int AddSig (int src, int dst) {
+-	sig *current;
++void AddKeyToList(sig **pptr, int id)
++{
++	while (*pptr)
++		pptr = &(*pptr)->next;
++
++	*pptr = (sig *) calloc (1,sizeof(sig));
++	(*pptr)->id = id;
++}
+ 
++void AddSig (int src, int dst) {
+ 	/* if GetKeyById returned -1, then we exit here */
+-	if ((src == -1) || (dst == -1)) return 0;
+-	
+-	current = sigsto+dst-1;
+-	while (current->next) {
+-		current = current->next;
+-	} 
+-	current->next = (sig *) calloc (1,(sizeof(sig)));
+-	current->next->id = src;
++	if ((src == -1) || (dst == -1))
++		return;
+ 
+-	/* and the reverse */
+-	current = sigsfrom+src-1;
+-	while (current->next) {
+-		current = current->next;
+-	} 
+-	current->next = (sig *) calloc (1,(sizeof(sig)));
+-	current->next->id = dst;
++	AddKeyToList(&keys[dst].to, src);
++	AddKeyToList(&keys[src].from, dst);
+ 	
+ 	numsigs++;
+ }
+ 
+-int CloseFiles() {
++void CloseFiles() {
+ 	fclose(fpin);
+ 	fclose(fpout);
+ }
+@@ -115,10 +115,10 @@
+ 	return ret;
+ }
+ 
+-unsigned long ConvertFromHex (const unsigned char *c) {
++unsigned int ConvertFromHex (const unsigned char *c) {
+ 	unsigned char buf1[5];
+ 	unsigned char buf2[5];
+-	unsigned long ret;
++	unsigned int ret;
+ 
+ 	buf1[4] = 0;
+ 	buf2[4] = 0;
+@@ -128,18 +128,27 @@
+ 	return ret;
+ }
+ 
+-/* recursive function in to mark connected keys in the connected set */
+-int DFSMarkConnected (int *markset, sig *ckset, int id) {
++void DeleteKeyList(sig **pptr)
++{
++	sig *current = *pptr;
++
++	while (*pptr) {
++		current = (*pptr)->next;
++		free (*pptr);
++		*pptr = current;
++	}
++}
++
++/* recursive function to mark connected keys in the connected set */
++int DFSMarkConnected (int *markset, int id) {
+ 	sig *psig;
+ 	int num = 1;
+ 	/* mark this node, call this function for all subnodes that aren't
+ 	 * marked already */
+ 	markset[id] = 1;
+-	psig = ckset+id-1;
+-	while (psig->next) {
+-		psig = psig->next;
++	for (psig = keys[id].from; psig; psig = psig->next) {
+ 		if (!markset[psig->id])
+-			num += DFSMarkConnected (markset, ckset, psig->id);
++			num += DFSMarkConnected (markset, psig->id);
+ 	}
+ 
+ 	return num;
+@@ -147,12 +156,13 @@
+ 
+ int GetKeyById(const unsigned char* searchid) {
+ 	int i;
+-	unsigned long s1,s2;
++	unsigned int s1,s2;
+ 
+ 	s1 = ConvertFromHex(searchid);
+ 	s2 = ConvertFromHex(searchid+8);
+-	for (i=0;i<numkeys;i++) {
+-		if ((s1 == keyid1[i]) && (s2 == keyid2[i])) {
++	for (i = 0; i < numkeys; i++) {
++		struct keydata *key = &keys[i];
++		if ((s1 == key->id1) && (s2 == key->id2)) {
+ 			return i;
+ 		}
+ 	}
+@@ -161,7 +171,7 @@
+ 
+ /* new _much_ faster BFS version of MeanCrawler() contributed by
+  * Hal J. Burch <hburch@halport.lumeta.com> */
+-int MeanCrawler(int *distset, int id, int len) {
++void MeanCrawler(int *distset, int id, int len) {
+ 	sig *psig;
+ 	int queue[MAXKEYS];
+ 	int qhead, qtail;
+@@ -175,13 +185,13 @@
+ 	while (qtail > qhead) {
+ 		id = queue[qhead++];
+ 		len = distset[id];
+-		psig = sigsto+id-1;
+-		while (psig->next) {
+-			psig = psig->next;
++		psig = keys[id].to;
++		while (psig) {
+ 			if ((len+1) < distset[psig->id]) {
+ 				distset[psig->id] = len+1;
+ 				queue[qtail++] = psig->id;
+ 			}
++			psig = psig->next;
+ 		}
+ 	}
+ } 
+@@ -202,27 +212,11 @@
+ 			totaldist += dist[i];
+ 			if (dist[i] < MAXHOPS) hops[dist[i]]++;
+ 			if (dist[i] > *hophigh) {
+-				sig *current = *farthest;
+-
+ 				*hophigh = dist[i];
+-				while (*farthest) {
+-					current = (*farthest)->next;
+-					free (*farthest);
+-					*farthest = current;
+-				}
++				DeleteKeyList(farthest);
+ 			}
+ 			if (dist[i] == *hophigh) {
+-				sig *new = *farthest;
+-
+-				while (new && new->next)
+-					new = new->next;
+-				if (!new) {
+-					*farthest = (sig *) calloc (1,sizeof(sig));
+-					(*farthest)->id = i;
+-				} else {
+-					new->next = (sig *) calloc (1,sizeof(sig));
+-					new->id = i;
+-				}
++				AddKeyToList(farthest, i);
+ 			}
+ 		}
+ 	}
+@@ -232,31 +226,21 @@
+ 	return ((float)totaldist / max_size);
+ }
+ 
+-FILE *OpenFileById(long id) {
++FILE *OpenFileById(unsigned int id) {
+ 	char buf[255];
+ 	char idchr[9];
+-	int i;
+-	FILE *fpret;
+ 
+ 	sprintf(idchr,"%08X",id);
+-	for (i=0;i<8;i++) {
+-		if (idchr[i] == ' ') idchr[i] = '0';
+-	}
+ 	
+ 	/* first the directory */
+  	buf[0] = '\0';
+-	strcat(buf,OUTDIR);
++	strcat(buf, outdir);
+ 	strncat(buf,idchr,2);
+ 	mkdir(buf,(mode_t)493);
+ 
+-	buf[0] = '\0';
+-	strcat(buf,OUTDIR);
+-	strncat(buf,idchr,2);
+ 	strcat(buf,"/");
+ 	strcat(buf,idchr);
+-	fpret = fopen(buf,"w");
+-	if (!fpret) return 0;
+-	return fpret;
++	return fopen(buf,"w");
+ }
+ 
+ /* ################################################################# */
+@@ -265,36 +249,36 @@
+ int OpenFiles() {
+ 	char buf[255];
+ 
+-	fpin = fopen(INFILE,"r");
++	fpin = fopen(infile, "r");
+ 	if (!fpin) return 1;
+ 
+ 	/* create output dir if necessary. this will just fail if it exists */
+-	mkdir(OUTDIR,(mode_t)493);
++	mkdir(outdir, (mode_t)493);
+ 
+ 	/* status file */
+ 	buf[0] = '\0';
+-	strcat(buf,OUTDIR);
++	strcat(buf, outdir);
+ 	strcat(buf,"status.txt"); 
+ 	fpstat = fopen(buf,"w");
+ 	if (!fpstat) return 1;
+ 
+ 	/* msd output file */
+ 	buf[0] = '\0';
+-	strcat(buf,OUTDIR);
++	strcat(buf, outdir);
+ 	strcat(buf,"msd.txt"); 
+ 	fpmsd = fopen(buf,"w");
+ 	if (!fpmsd) return 1;
+ 
+ 	/* othersets output file */
+ 	buf[0] = '\0';
+-	strcat(buf,OUTDIR);
++	strcat(buf, outdir);
+ 	strcat(buf,"othersets.txt"); 
+ 	fpsets = fopen(buf,"w");
+ 	if (!fpsets) return 1;
+ 
+ 	/* other output file */
+ 	buf[0] = '\0';
+-	strcat(buf,OUTDIR);
++	strcat(buf, outdir);
+ 	strcat(buf,"other.txt"); 
+ 	fpout = fopen(buf,"w");
+ 	if (!fpout) return 1;
+@@ -302,16 +286,58 @@
+ 	return 0;
+ }
+ 
+-int ReadInput() {
++void ParseArgs(int argc, char **argv)
++{
++	int outdirlen;
++
++	while (1) {
++		int option = getopt(argc, argv, "i:o:");
++		if (option == -1)
++			break;
++		switch (option) {
++		case 'i':
++			infile = optarg;
++			break;
++		case 'o':
++			outdir = optarg;
++			outdirlen = strlen(outdir);
++			if (outdir[outdirlen - 1] != '/') {
++				outdir = malloc(outdirlen + 2);
++				memcpy(outdir, optarg, outdirlen);
++				outdir[outdirlen] = '/';
++				outdir[outdirlen + 1] = '\0';
++			}
++			break;
++		}
++	}
++
++	if (optind < argc) {
++		/* Assume it's infile */
++		infile = argv[optind];
++	}
++}
++
++int PrintKeyList(FILE *f, sig *s)
++{
++	int i = 0;
++	while (s) {
++		struct keydata *key = &keys[s->id];
++		fprintf(f, "  %08X %08X\n", key->id1, key->id2);
++		s = s->next;
++		i++;
++	}
++	return i;
++}
++
++void ReadInput() {
+ 	unsigned char buf[20];
+-	int currentkey;
++	int currentkey = -1;
+ 	
+ 	fprintf(fpstat,"Importing pass 1 (keys)...\n");
+-	while (!feof(fpin))	{
+-		fread(buf,1,18,fpin);
++	while (fread(buf,1,18,fpin) == 18) {
+ 		if (buf[17] != '\n') continue;
+ 		if (buf[0] == 'p') {
+-				AddKey(buf+1);
++			AddKey(buf+1);
+ 		}
+ 	}
+ 	fprintf(fpstat,"done.\n");
+@@ -319,14 +345,13 @@
+ 
+ 	rewind(fpin);
+ 	fprintf(fpstat,"Importing pass 2 (sigs)...\n");
+-	while (!feof(fpin))	{
+-		fread(buf,1,18,fpin);
++	while (fread(buf,1,18,fpin) == 18) {
+ 		if (buf[17] != '\n') continue;
+ 		if (buf[0] == 'p') {
+ 			currentkey = GetKeyById(buf+1);
+ 			if (currentkey == -1) {
+ 				fprintf(fpstat,"Error finding key in pass 2.\n");
+-				exit();
++				exit(EXIT_FAILURE);
+ 			}
+ 		}
+ 		if (buf[0] == 's') {
+@@ -345,7 +370,7 @@
+  * signature imports, this will save time for future runs of the program
+  * with the same data set. */
+ 
+-int SaveState() {
++void SaveState() {
+ 	/* not yet implemented. need to figure out how to best handle the
+ 	 * linked lists of sigs first */
+ }
+@@ -357,14 +382,14 @@
+ int stackindex;
+ int lastdfsnum;
+ 
+-int DFSVisit(int id) {
++void DFSVisit(int id) {
+ 	sig *psig;
+ 
+ 	dfsnum[id] = lownum[id] = ++lastdfsnum;
+ 	stack[stackindex++] = id;
+ 
+-	for (psig = sigsto + id - 1; psig->next != NULL; psig = psig->next) {
+-		int neighbor = psig->next->id;
++	for (psig = keys[id].to; psig; psig = psig->next) {
++		int neighbor = psig->id;
+ 
+ 		if (removed[neighbor])
+ 			continue;
+@@ -382,11 +407,13 @@
+ 		int i, size = 0;
+ 
+ 		do {
++			struct keydata *key;
+ 			i = stack[--stackindex];
++			key = &keys[i];
+ 			component[i] = id;
+ 			removed[i] = 1;
+ 			size++;
+-			fprintf(fpsets, "%08X %08X\n", keyid1[i], keyid2[i]);
++			fprintf(fpsets, "%08X %08X\n", key->id1, key->id2);
+ 		} while (i != id);
+ 
+ 		fprintf(fpsets,
+@@ -399,14 +426,14 @@
+ 	}
+ }
+ 
+-int TestConnectivity() {
++void TestConnectivity() {
+ 	int i;
+ 
+ 	for (i = 0; i < numkeys; i++)
+ 		if (!dfsnum[i])
+ 			DFSVisit (i);
+ 
+-	num_reachable = DFSMarkConnected (reachable, sigsfrom, max_component);
++	num_reachable = DFSMarkConnected (reachable, max_component);
+ 
+ 	fprintf(fpstat,"reachable set is size %d\n", num_reachable);
+ 	fprintf(fpstat,"strongly connected set is size %d\n", max_size);
+@@ -415,13 +442,11 @@
+ /* ################################################################# */
+ /* report functions, sort of top level */
+ 
+-int IndivReport(FILE *fp,int key) {
+-	int totalsigsto = 0, totalsigsfrom = 0;
+-	sig *current;
+-	int i;
++void IndivReport(FILE *fp,int key) {
++	int totalsigsto, totalsigsfrom;
+ 
+ 	/* head of report */
+-	fprintf(fp,"KeyID %08X %08X\n\n",keyid1[key],keyid2[key]);
++	fprintf(fp,"KeyID %08X %08X\n\n", keys[key].id1, keys[key].id2);
+ 
+ 	fprintf(fp,"This individual key report was generated as part of the monthly keyanalyze\n");
+ 	fprintf(fp,"report at http://dtype.org/keyanalyze/.\n\n");
+@@ -430,23 +455,12 @@
+ 	fprintf(fp,"includes keys with signatures other than their own.\n\n");
+ 
+ 	fprintf(fp,"Signatures to this key:\n");
+-	current = sigsto+key-1;
+-	while (current->next) {
+-		current = current->next;
+-		fprintf(fp,"  %08X %08X\n",keyid1[current->id],keyid2[current->id]);
+-		totalsigsto++;
+-	}
+-	fprintf(fp,"Total: %ld signatures to this id from this set\n\n",totalsigsto);
++	totalsigsto = PrintKeyList(fp, keys[key].to);
++	fprintf(fp,"Total: %d signatures to this id from this set\n\n",totalsigsto);
+ 		 
+ 	fprintf(fp,"Signatures from this key:\n");
+-	current = sigsfrom+key-1;
+-	while (current->next) {
+-		current = current->next;
+-		fprintf(fp,"  %08X %08X\n",keyid1[current->id],keyid2[current->id]);
+-		totalsigsfrom++;
+-	}
+-
+-	fprintf(fp,"Total: %ld signatures from this id to this set\n\n",totalsigsfrom);
++	totalsigsfrom = PrintKeyList(fp, keys[key].from);
++	fprintf(fp,"Total: %d signatures from this id to this set\n\n",totalsigsfrom);
+ }
+ 
+ /* ################################################################# */
+@@ -464,6 +478,7 @@
+ 	threadparam data = *(threadparam *)arg;
+ 
+ 	for (i=0;i<numkeys;i++) {
++		struct keydata *key = &keys[i];
+ 		/* do this for all set2 now */
+ 		if (reachable[i] && ((i%2)==data.threadnum)) {
+ 			/* zero out hop histogram */
+@@ -475,47 +490,44 @@
+ 			pthread_mutex_lock(&mean_l);
+ 			meantotal += threadmean;
+ 			fprintf(fpmsd,"%08X %08X %8.4f\n"
+-				,keyid1[i],keyid2[i],threadmean);
++				,key->id1, key->id2, threadmean);
+ 			fflush(fpmsd);
+ 			pthread_mutex_unlock(&mean_l);
+ 
+ 			/* individual report */
+-			fpindiv = OpenFileById(keyid2[i]);
++			fpindiv = OpenFileById(key->id2);
+ 			IndivReport(fpindiv,i);
+-			fprintf(fpindiv, "This key is%sin the strong set.\n",
+-				component[i] == max_component ? " " : " not ");
++			fprintf(fpindiv, "This key is %sin the strong set.\n",
++				component[i] == max_component ? "" : "not ");
+ 			fprintf(fpindiv,"Mean distance to this key from strong set: %8.4f\n\n",threadmean);
+ 			fprintf(fpindiv,"Breakout by hop count (only from strong set):\n");
+ 			for (j=0;j<=hophigh;j++) {
+ 				fprintf(fpindiv,"%2d hops: %5d\n",j,hops[j]);
+ 		 	}
+ 			if (distant_sigs) {
+-				sig *current = distant_sigs;
+-
+ 				fprintf(fpindiv,"\nFarthest keys (%d hops):\n", j-1);
+-				while (distant_sigs) {
+-					fprintf(fpindiv, "  %08X %08X\n", keyid1[current->id], keyid2[current->id]);
+-					current = distant_sigs->next;
+-					free (distant_sigs);
+-                                        distant_sigs = current;
+-				}
++				PrintKeyList(fpindiv, distant_sigs);
++				DeleteKeyList(&distant_sigs);
+ 			}
+ 			fclose(fpindiv);
+ 		} 
+ 	}
++	return NULL;
+ }
+ 
+ /* ################################################################# */
+ /* main() */
+ 
+-int main () {
++int main(int argc, char **argv)
++{
+ 	pthread_t 	*slave0,*slave1;
+ 	threadparam arg0,arg1;
+ 	void 	 	*retval;
+ 
++	ParseArgs(argc, argv);
+ 	if (OpenFiles()) {
+-		fprintf(fpout,"Error opening files.\n");
+-		exit();
++		fprintf(stderr, "Error opening files.\n");
++		exit(EXIT_FAILURE);
+ 	}
+ 	ReadInput();
+ 	TestConnectivity();
+@@ -538,4 +550,5 @@
+ 	fprintf(fpout,"Average mean is %9.4f\n",meantotal/num_reachable);
+ 	/* ReportMostSignatures(); */
+ 	CloseFiles(); 
++	return 0;
+ }
