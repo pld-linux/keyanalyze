@@ -3,7 +3,7 @@ Summary(pl):	Analiza pier¶cieni kluczy w formacie OpenPGP
 Name:		keyanalyze
 Version:	200204
 Release:	3
-License:	GPL	
+License:	GPL
 Group:		Applications
 Source0:	http://dtype.org/keyanalyze/code/%{name}-%{version}.tar.gz
 # Source0-md5:	46c1928c0ed298696f9f06b747fa0e85
