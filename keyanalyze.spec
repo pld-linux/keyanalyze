@@ -1,5 +1,5 @@
 Summary:	Analyze OpenPGP style keyrings
-Summary(pl):	Analiza pier¶cieni kluczów w formacie OpenPGP
+Summary(pl):	Analiza pier¶cieni kluczy w formacie OpenPGP
 Name:		keyanalyze
 Version:	200204
 Release:	1
@@ -24,7 +24,13 @@ including a "mean shortest distance" calculation to show the most
 connected keys. This code is also used to create a report based on an
 extremely large keyset once per month.
 
-#%description -l pl
+%description -l pl
+Keyanalyze s³u¿y do analizy pier¶cieni kluczy w formacie OpenPGP (PGP
+i GnuPG). Przegl±da w³asno¶ci ³±cz±ce do wygenerowania analizy silnie
+po³±czonych zbiorów, a tak¿e pewnych statystyk, w tym obliczenia
+"¶redniej najkrótszej odleg³o¶ci", aby pokazaæ najbardziej po³±czone
+klucze. Ten kod s³u¿y tak¿e do tworzenia raportów miesiêcznych w
+oparciu o bardzo du¿e zbiory kluczy.
 
 %prep
 %setup -q
@@ -48,10 +54,10 @@ cd ..
 
 %install
 rm -rf $RPM_BUILD_ROOT
-cd pgpring
-%{__make} install \
+
+%{__make} -C pgpring install \
 	DESTDIR=$RPM_BUILD_ROOT
-cd ..
+
 install keyanalyze process_keys $RPM_BUILD_ROOT%{_bindir}
 
 %clean
