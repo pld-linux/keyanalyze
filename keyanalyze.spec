@@ -1,5 +1,5 @@
 Summary:	Analyze OpenPGP style keyrings
-Summary(pl.UTF-8):   Analiza pierścieni kluczy w formacie OpenPGP
+Summary(pl.UTF-8):	Analiza pierścieni kluczy w formacie OpenPGP
 Name:		keyanalyze
 Version:	200204
 Release:	3
